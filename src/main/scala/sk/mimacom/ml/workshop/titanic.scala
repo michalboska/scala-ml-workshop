@@ -5,23 +5,22 @@ import org.apache.spark.ml.classification.LogisticRegression
 import org.apache.spark.ml.feature.{OneHotEncoder, StringIndexer, VectorAssembler}
 import org.apache.spark.ml.{Pipeline, PipelineModel}
 import org.apache.spark.mllib.evaluation.MulticlassMetrics
-import org.apache.spark.sql.functions.rand
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.{SparkConf, SparkContext}
 
 
-object Main extends App {
+object Titanic extends App {
   Logger.getLogger("org").setLevel(Level.ERROR)
 
   val conf = new SparkConf().setAppName(s"LDAExample").setMaster("local[*]").set("spark.executor.memory", "2g").set("spark.sql.warehouse.dir", "file:///spark-warehouse")
   val spark = SparkSession.builder().config(conf).getOrCreate()
   val sc = spark.sparkContext
-  val lda = new Main(sc, spark)
+  val lda = new Titanic(sc, spark)
 
   lda.run()
 }
 
-class Main(sc: SparkContext, spark: SparkSession) {
+class Titanic(sc: SparkContext, spark: SparkSession) {
 
   def run(): Unit = {
     println("[Loading data...]")
@@ -44,9 +43,24 @@ class Main(sc: SparkContext, spark: SparkSession) {
   def loadDataToDataFrame(spark: SparkSession): DataFrame = {
     import spark.sqlContext.implicits._
 
-    val data = spark.read.option("header", "true").option("inferSchema", "true").format("csv").load("src\\main\\resources\\bank-full.csv")
+    val data = spark.read.option("header", "true").option("inferSchema", "true").format("csv").load("src\\main\\resources\\titanic.csv")
 
-    val logregdataall = data.select(data("y").as("label"), $"age", $"job", $"marital", $"education", $"default", $"balance", $"housing", $"loan", $"contact", $"day", $"month", $"duration", $"campaign", $"pdays", $"previous", $"poutcome")
+    data.printSchema()
+    data.show(5)
+
+    val logregdataall = (
+      data.select(data("Survived").as("label"),
+        $"Pclass",
+        $"Name",
+        $"Sex",
+        $"Age",
+        $"SibSp",
+        $"Parch",
+        $"Ticket",
+        $"Fare",
+        $"Cabin",
+        $"Embarked")
+      )
 
     val logregdata = logregdataall.na.drop()
 
@@ -56,30 +70,37 @@ class Main(sc: SparkContext, spark: SparkSession) {
   def splitTrainingAndTestingData(df: DataFrame): Array[Dataset[Row]] = {
 
     var Array(training, test) = df.randomSplit(Array(70, 30), seed = 12345)
-
-    training = training.select("*").where("label = 1").limit(10000).union(training.select("*").where("label = 0").limit(10000)).orderBy(rand())
-    test = test.select("*").where("label = 1").limit(2000).union(test.select("*").where("label = 0").limit(2000)).orderBy(rand())
-
     Array(training, test)
   }
 
   def scanRecordsAndComputePrediction(model: PipelineModel): Any = {
     import spark.sqlContext.implicits._
+
     var exitInput = "n"
 
     do {
 
       try {
         println("TYPE ONE LINE INPUT.\n SYNTAX:")
-        println("age        [num];")
-        println("job        [admin.| management | technician | blue-collar | entrepreneur | housemaid | services | retired | student | unemployed];")
-        println("education  [primary | secondary | tertiary ];")
-        println("marital    [single | married | divorced]")
+        println("Pclass         [num]{1,2,3};")
+        println("Sex            [male | female];")
+        println("Age            [num];")
+        println("Num of siblings/spouses    [num];")
+        println("Num of parents/children    [num];")
+        println("Price paid for ticket      [num];")
+        println("City where boarded         [C(herbourg) | Q(ueenstown) | S(outhampton)];")
         print(">")
 
         val inputs = scala.io.StdIn.readLine().split(";")
 
-        var df = List((inputs(0).toInt, inputs(1), inputs(2), inputs(3))).toDF("age", "job", "education", "marital")
+        var df = List((inputs(0).toInt,
+          inputs(1),
+          inputs(2).toInt,
+          inputs(3).toInt,
+          inputs(4).toInt,
+          inputs(5).toDouble,
+          inputs(6))).toDF("Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked")
+
 
         val results2 = model.transform(df)
         results2.select("probability", "prediction").show(false)
@@ -88,7 +109,7 @@ class Main(sc: SparkContext, spark: SparkSession) {
         exitInput = String.valueOf(scala.io.StdIn.readLine())
       }
       catch {
-        case e: Exception => println("Bad input!")
+        case e: Exception => println("Bad input!" + e.toString)
       }
 
     } while (!exitInput.equals("y"))
@@ -110,33 +131,21 @@ class Main(sc: SparkContext, spark: SparkSession) {
   }
 
   private def getPrepearedLogisticReg = {
-    val jobIndexer = new StringIndexer().setInputCol("job").setOutputCol("JobIndex")
-    val maritalIndexer = new StringIndexer().setInputCol("marital").setOutputCol("MaritalIndex")
-    val educationIndexer = new StringIndexer().setInputCol("education").setOutputCol("EducationIndex")
-    val contactIndexer = new StringIndexer().setInputCol("contact").setOutputCol("ContactIndex")
-    val monthIndexer = new StringIndexer().setInputCol("month").setOutputCol("MonthIndex")
-    val poutcomeIndexer = new StringIndexer().setInputCol("poutcome").setOutputCol("PoutcomeIndex")
+    val sexIndexer = new StringIndexer().setInputCol("Sex").setOutputCol("SexIndex")
+    val embarkedIndexer = new StringIndexer().setInputCol("Embarked").setOutputCol("EmbarkedIndex")
 
-
-    val jobEncoder = new OneHotEncoder().setInputCol("JobIndex").setOutputCol("JobVec")
-    val maritalEncoder = new OneHotEncoder().setInputCol("MaritalIndex").setOutputCol("MaritalVec")
-    val educationEncoder = new OneHotEncoder().setInputCol("EducationIndex").setOutputCol("EducationVec")
-    val contactEncoder = new OneHotEncoder().setInputCol("ContactIndex").setOutputCol("ContactVec")
-    val monthEncoder = new OneHotEncoder().setInputCol("MonthIndex").setOutputCol("MonthVec")
-    val poutcomeEncoder = new OneHotEncoder().setInputCol("PoutcomeIndex").setOutputCol("PoutcomeVec")
-
+    val sexEncoder = new OneHotEncoder().setInputCol("SexIndex").setOutputCol("SexVec")
+    val embarkedEncoder = new OneHotEncoder().setInputCol("EmbarkedIndex").setOutputCol("EmbarkedVec")
 
     val assemblerFeatures = new VectorAssembler()
-      .setInputCols(Array("JobVec", "MaritalVec", "EducationVec", "ContactVec", "MonthVec", "PoutcomeVec", "age", "default", "balance", "housing", "loan", "day", "duration", "campaign", "pdays", "previous"))
+      .setInputCols(Array("Pclass", "SexVec", "Age", "SibSp", "Parch", "Fare", "EmbarkedVec"))
       .setOutputCol("features")
 
     val lr = new LogisticRegression()
 
     val pipeline = new Pipeline().setStages(
-      Array(jobIndexer, maritalIndexer, educationIndexer, contactIndexer, monthIndexer, poutcomeIndexer,
-        jobEncoder, maritalEncoder, educationEncoder, contactEncoder, monthEncoder, poutcomeEncoder, assemblerFeatures, lr)
+      Array(sexIndexer, embarkedIndexer, sexEncoder, embarkedEncoder, assemblerFeatures, lr)
     )
     pipeline
   }
 }
-
