@@ -84,7 +84,7 @@ class LinRegression(sc: SparkContext, spark: SparkSession) {
         println("index of accessibility to radial highways [num];")
         println("full-value property-tax rate per $10,000 [num];")
         println("pupil-teacher ratio by town [num];")
-        println("Proportion of blacks (black race) by town [num];")
+        println("Proportion of blacks (black race) by town (1000(X - 0.63)^2) [num];")
         println("% lower status of the population [num];")
         print(">")
 
